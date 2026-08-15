@@ -6,7 +6,13 @@
 
 - **安装浏览器扩展** [Tampermonkey](https://www.tampermonkey.net/)
 
-- [安装脚本](https://greasyfork.org/zh-CN/scripts/521110-b%E7%AB%99%E5%8A%A8%E6%80%81%E6%89%B9%E9%87%8F%E5%88%A0%E9%99%A4%E5%B7%A5%E5%85%B7)
+- [安装脚本（GitHub Raw）](https://raw.githubusercontent.com/chorusfruit-233/bilibili-dynamic-cleaner/main/Bilibili动态批量删除.js)
+
+- 国内网络可选镜像：[安装脚本（jsDelivr CDN）](https://cdn.jsdelivr.net/gh/chorusfruit-233/bilibili-dynamic-cleaner@main/Bilibili动态批量删除.js)
+
+> 若浏览器未自动弹出安装页，请复制上面的地址到 Tampermonkey 管理面板 →「实用工具」→「从 URL 安装」。
+>
+> 本项目 fork 自原版 [B站动态批量删除工具](https://greasyfork.org/zh-CN/scripts/521110-b%E7%AB%99%E5%8A%A8%E6%80%81%E6%89%B9%E9%87%8F%E5%88%A0%E9%99%A4%E5%B7%A5%E5%85%B7)（GreasyFork）。
 
 ---
 
