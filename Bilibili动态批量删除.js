@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站动态批量删除工具
-// @version      2.0.0
-// @description  用于清除B站动态的脚本，可区分转发动态、文字动态、图片动态、视频动态，并且可以输出删除日志及删除的动态内容（v2：适配B站新版 Polymer 接口，移除外部 CDN 依赖）
+// @version      2.1.1
+// @description  用于清除B站动态的脚本，可区分转发动态、文字动态、图片动态、投稿动态，并且可以输出删除日志及删除的动态内容（v2：适配B站新版 Polymer 接口，移除外部 CDN 依赖）
 // @author       秦心桜
 // @match        https://space.bilibili.com/*/dynamic
 // @match        http://space.bilibili.com/*/dynamic
@@ -18,6 +18,7 @@
     const uid = window.location.pathname.split("/")[1];
     const logs = [];
     let deleteCount = 0;
+    let matchCount = 0;
     let totalCount = 0;
     let isRunning = false;
     let stopRequested = false;
@@ -33,7 +34,7 @@
         FORWARD: "DYNAMIC_TYPE_FORWARD",   // 转发动态
         WORD: "DYNAMIC_TYPE_WORD",         // 文字动态
         DRAW: "DYNAMIC_TYPE_DRAW",         // 图片动态（图文）
-        AV: "DYNAMIC_TYPE_AV",             // 视频动态
+        AV: "DYNAMIC_TYPE_AV",             // 投稿动态（视频投稿）
         SHORT: "DYNAMIC_TYPE_SHORT",       // 小视频
         COMMON_SQUARE: "DYNAMIC_TYPE_COMMON_SQUARE", // 普通动态（按文字处理）
     };
@@ -41,7 +42,7 @@
         [DYNAMIC_TYPES.FORWARD]: "转发",
         [DYNAMIC_TYPES.WORD]: "文字",
         [DYNAMIC_TYPES.DRAW]: "图片",
-        [DYNAMIC_TYPES.AV]: "视频",
+        [DYNAMIC_TYPES.AV]: "投稿",
     };
 
     const COMMON_HEADERS = {
@@ -182,8 +183,10 @@
         isRunning = true;
         stopRequested = false;
         deleteCount = 0;
+        matchCount = 0;
         totalCount = 0;
-        updateProgress(0, 0);
+        const seenIds = new Set();
+        updateProgress(0, 0, 0);
         setButtonsDisabled(true);
         logPanel(`开始清理【${TYPE_LABELS[type] || type}】动态……`);
 
@@ -218,16 +221,24 @@
                 const items = Array.isArray(data.items) ? data.items : [];
                 if (items.length === 0) break;
                 hasMore = !!data.has_more;
-                totalCount += items.length;
 
                 for (const item of items) {
                     if (stopRequested) break;
 
                     const dynamicId = item.id_str;
+                    // 删除过程中分页可能重叠返回同一动态，按 id 去重，避免重复扫描/重复删除导致计数与实际不符
+                    if (!dynamicId || seenIds.has(dynamicId)) continue;
+                    seenIds.add(dynamicId);
+                    totalCount++;
+                    updateProgress(deleteCount, matchCount, totalCount);
+
                     const { text, origin } = extractContent(item);
                     const content = origin ? `${text} ${origin}` : text;
 
                     if (!isTargetType(item, type)) continue;
+
+                    matchCount++;
+                    updateProgress(deleteCount, matchCount, totalCount);
 
                     try {
                         const result = await api.removeDynamic(dynamicId);
@@ -243,12 +254,17 @@
                         logDeletion(dynamicId, "出错", type, content);
                         logPanel(`删除出错 ${dynamicId}：${error.message}`, true);
                     }
-                    updateProgress(deleteCount, totalCount);
+                    updateProgress(deleteCount, matchCount, totalCount);
                     await api.sleep(delay);
                 }
 
-                offset = data.offset || "";
-                if (!offset) hasMore = false;
+                // 游标没有前进说明分页到头或接口异常，停止翻页避免死循环/重复扫描
+                const nextOffset = data.offset || "";
+                if (!nextOffset || nextOffset === offset) {
+                    hasMore = false;
+                } else {
+                    offset = nextOffset;
+                }
                 await api.sleep(500);
             }
         } finally {
@@ -257,10 +273,10 @@
             if (stopRequested) {
                 logPanel("已手动停止。", true);
             } else {
-                logPanel(`清理${aborted ? "中止" : "完成"}，共删除 ${deleteCount} 条动态。`);
+                logPanel(`清理${aborted ? "中止" : "完成"}：删除 ${deleteCount} / 匹配 ${matchCount} / 扫描 ${totalCount}。`);
             }
             const state = stopRequested ? "已停止" : (aborted ? "已中止" : "完成");
-            alert(`清理${state}，共删除 ${deleteCount} 条类型为【${TYPE_LABELS[type] || type}】的动态！`);
+            alert(`清理${state}！共删除 ${deleteCount} 条，匹配 ${matchCount} 条，共扫描 ${totalCount} 条【${TYPE_LABELS[type] || type}】动态。`);
         }
     }
 
@@ -289,14 +305,17 @@
         alert("日志导出成功！");
     }
 
-    function updateProgress(current, total) {
+    function updateProgress(deleted, matched, scanned) {
         const progressBar = document.getElementById("progressBar");
         const deleteCountElem = document.getElementById("deleteCount");
+        const matchCountElem = document.getElementById("matchCount");
         const totalCountElem = document.getElementById("totalCount");
 
-        deleteCountElem.textContent = current;
-        totalCountElem.textContent = total;
-        progressBar.style.width = total ? `${(current / total) * 100}%` : "0%";
+        deleteCountElem.textContent = deleted;
+        matchCountElem.textContent = matched;
+        totalCountElem.textContent = scanned;
+        // 进度条按“已删除 / 匹配到的目标动态”计算；没有匹配时为 0
+        progressBar.style.width = matched ? `${(deleted / matched) * 100}%` : "0%";
     }
 
     function logPanel(msg, isError = false) {
@@ -338,7 +357,7 @@
             <button class="custom-button" id="clearAllButton">删除转发动态</button>
             <button class="custom-button" id="clearTextButton">删除文字动态</button>
             <button class="custom-button" id="clearImageButton">删除图片动态</button>
-            <button class="custom-button" id="clearVideoButton">删除视频动态</button>
+            <button class="custom-button" id="clearVideoButton">删除投稿动态（连带删视频！）</button>
             <button class="custom-button" id="exportLogsButton">导出清除日志及内容</button>
             <button class="custom-button" id="stopButton" style="background: rgba(255,80,80,0.35);" disabled>停止当前任务</button>
 
@@ -349,6 +368,7 @@
 
             <div style="margin-top: 10px; color: white; font-size: 14px;">
                 已删除：<span id="deleteCount" style="color: #ff6b6b;">0</span> /
+                匹配：<span id="matchCount" style="color: #feca57;">0</span> /
                 已扫描：<span id="totalCount" style="color: #1e90ff;">0</span>
             </div>
 
@@ -390,7 +410,13 @@
         document.getElementById("clearAllButton").addEventListener("click", () => clearDynamicsByType(DYNAMIC_TYPES.FORWARD));
         document.getElementById("clearTextButton").addEventListener("click", () => clearDynamicsByType(DYNAMIC_TYPES.WORD));
         document.getElementById("clearImageButton").addEventListener("click", () => clearDynamicsByType(DYNAMIC_TYPES.DRAW));
-        document.getElementById("clearVideoButton").addEventListener("click", () => clearDynamicsByType(DYNAMIC_TYPES.AV));
+        // 投稿动态与视频稿件在B站是绑定的：删除动态会连带删除视频本身，必须强提醒
+        document.getElementById("clearVideoButton").addEventListener("click", () => {
+            if (!confirm("⚠️ 重要提示：\nB站将「投稿动态」与「视频稿件」绑定，删除投稿动态会连带删除对应的视频投稿，且无法恢复！\n\n确定要删除投稿动态（含视频本身）吗？")) {
+                return;
+            }
+            clearDynamicsByType(DYNAMIC_TYPES.AV);
+        });
         document.getElementById("exportLogsButton").addEventListener("click", exportLogs);
         document.getElementById("stopButton").addEventListener("click", () => {
             stopRequested = true;
